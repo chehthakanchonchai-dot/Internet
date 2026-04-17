@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>นาฬิกาจับเวลา (อิงอินเทอร์เน็ต)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Prompt', sans-serif;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen flex items-center justify-center p-4">
+
+    <div class="glass-panel w-full max-w-md rounded-3xl shadow-xl overflow-hidden transition-all duration-300 transform hover:shadow-2xl">
+        
+        <!-- Header & Status -->
+        <div class="bg-white/50 px-6 py-4 border-b border-gray-100 flex justify-between items-center">
+            <h1 class="text-gray-700 font-semibold text-lg flex items-center gap-2">
+                <i class="fas fa-stopwatch text-indigo-500"></i> นาฬิกาจับเวลา
+            </h1>
+            <div id="networkStatus" class="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-700 transition-colors duration-300">
+                <span class="relative flex h-3 w-3">
+                  <span id="statusPing" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                  <span id="statusDot" class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                </span>
+                <span id="statusText">ออนไลน์</span>
+            </div>
+        </div>
+
+        <!-- Warning Message Box (Hidden by default) -->
+        <div id="offlineWarning" class="hidden bg-red-50 border-l-4 border-red-500 p-4 mx-6 mt-4 rounded shadow-sm">
+            <div class="flex">
+                <div class="flex-shrink-0">
+                    <i class="fas fa-wifi text-red-500"></i>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm text-red-700 font-medium">
+                        การเชื่อมต่อขาดหาย ระบบหยุดนับเวลาชั่วคราว
+                    </p>
+                    <p class="text-xs text-red-500 mt-1">
+                        จะนับต่ออัตโนมัติเมื่ออินเทอร์เน็ตกลับมา
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Timer Display -->
+        <div class="p-8 text-center">
+            <div class="text-5xl sm:text-6xl font-bold text-gray-800 tracking-wider font-mono drop-shadow-sm mb-2" id="timeDisplay">
+                00:00:00
+            </div>
+            <div class="text-xl text-gray-500 font-mono font-medium" id="msDisplay">
+                .000
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="px-6 pb-8 flex justify-center gap-4">
+            <button id="startBtn" onclick="toggleTimer()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-3 px-6 rounded-xl font-medium shadow-md hover:shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2">
+                <i class="fas fa-play" id="startIcon"></i> 
+                <span id="startText">เริ่มจับเวลา</span>
+            </button>
+            <button onclick="resetTimer()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 py-3 px-6 rounded-xl font-medium shadow-sm hover:shadow transition-all active:scale-95 flex items-center justify-center gap-2">
+                <i class="fas fa-redo"></i> รีเซ็ต
+            </button>
+        </div>
+
+    </div>
+
+    <script>
+        // State variables
+        let startTime = 0;
+        let elapsedTime = 0;
+        let timerInterval = null;
+        let isRunning = false;
+        let isOnline = navigator.onLine;
+        let wasRunningBeforeOffline = false; // To track if we should auto-resume
+        let wakeLock = null; // สำหรับป้องกันหน้าจอดับ
+
+        // ฟังก์ชันสำหรับขอให้หน้าจอสว่างตลอดเวลา
+        async function requestWakeLock() {
+            if ('wakeLock' in navigator) {
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    console.log('Screen Wake Lock ทำงาน: หน้าจอจะไม่ดับ');
+                } catch (err) {
+                    console.error(`ไม่สามารถเปิด Screen Wake Lock ได้: ${err.name}, ${err.message}`);
+                }
+            }
+        }
+
+        // เมื่อสลับแท็บกลับมา ให้ทำงานต่อ (บราวเซอร์มักจะยกเลิก Wake Lock เองเมื่อสลับแท็บ)
+        document.addEventListener('visibilitychange', async () => {
+            if (wakeLock !== null && document.visibilityState === 'visible') {
+                await requestWakeLock();
+            }
+        });
+
+        // DOM Elements
+        const displayTime = document.getElementById('timeDisplay');
+        const displayMs = document.getElementById('msDisplay');
+        const startBtn = document.getElementById('startBtn');
+        const startIcon = document.getElementById('startIcon');
+        const startText = document.getElementById('startText');
+        
+        const networkStatus = document.getElementById('networkStatus');
+        const statusText = document.getElementById('statusText');
+        const statusDot = document.getElementById('statusDot');
+        const statusPing = document.getElementById('statusPing');
+        const offlineWarning = document.getElementById('offlineWarning');
+
+        // Initialize status on load
+        updateNetworkStatus(navigator.onLine);
+
+        // Network Event Listeners
+        window.addEventListener('online', () => {
+            updateNetworkStatus(true);
+            // Auto resume if it was running before connection lost
+            if (wasRunningBeforeOffline) {
+                startTimer();
+                wasRunningBeforeOffline = false;
+            }
+        });
+
+        window.addEventListener('offline', () => {
+            updateNetworkStatus(false);
+            // Pause timer if running
+            if (isRunning) {
+                wasRunningBeforeOffline = true;
+                pauseTimer();
+            } else {
+                wasRunningBeforeOffline = false;
+            }
+        });
+
+        function updateNetworkStatus(online) {
+            isOnline = online;
+            if (online) {
+                networkStatus.className = 'flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-700 transition-colors duration-300';
+                statusDot.className = 'relative inline-flex rounded-full h-3 w-3 bg-green-500';
+                statusPing.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75';
+                statusPing.style.display = 'block';
+                statusText.innerText = 'ออนไลน์';
+                offlineWarning.classList.add('hidden');
+                
+                // Re-enable button if it was disabled
+                startBtn.disabled = false;
+                startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            } else {
+                networkStatus.className = 'flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-700 transition-colors duration-300';
+                statusDot.className = 'relative inline-flex rounded-full h-3 w-3 bg-red-500';
+                statusPing.style.display = 'none'; // Stop ping animation when offline
+                statusText.innerText = 'ออฟไลน์';
+                
+                if(wasRunningBeforeOffline || isRunning) {
+                   offlineWarning.classList.remove('hidden');
+                }
+
+                // Disable start button when offline
+                startBtn.disabled = true;
+                startBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            }
+        }
+
+        function toggleTimer() {
+            // ขอ Wake Lock เมื่อมีการคลิก (ผู้ใช้มีปฏิสัมพันธ์กับเว็บ) เพื่อให้หน้าจอไม่ดับ
+            if (wakeLock === null) {
+                requestWakeLock();
+            }
+
+            if (!isOnline) return; // Prevent starting if offline
+
+            if (isRunning) {
+                pauseTimer();
+                wasRunningBeforeOffline = false; // Manually paused
+            } else {
+                startTimer();
+            }
+        }
+
+        function startTimer() {
+            if (!isOnline) return;
+
+            isRunning = true;
+            startTime = Date.now() - elapsedTime;
+            
+            timerInterval = setInterval(() => {
+                elapsedTime = Date.now() - startTime;
+                updateDisplay(elapsedTime);
+            }, 10); // Update every 10ms for smooth ms display
+
+            // Update UI
+            startBtn.classList.remove('bg-indigo-600', 'hover:bg-indigo-700');
+            startBtn.classList.add('bg-amber-500', 'hover:bg-amber-600');
+            startIcon.className = 'fas fa-pause';
+            startText.innerText = 'หยุดพัก';
+        }
+
+        function pauseTimer() {
+            isRunning = false;
+            clearInterval(timerInterval);
+            
+            // Update UI
+            startBtn.classList.remove('bg-amber-500', 'hover:bg-amber-600');
+            startBtn.classList.add('bg-indigo-600', 'hover:bg-indigo-700');
+            startIcon.className = 'fas fa-play';
+            startText.innerText = 'นับต่อ';
+        }
+
+        function resetTimer() {
+            isRunning = false;
+            wasRunningBeforeOffline = false;
+            clearInterval(timerInterval);
+            elapsedTime = 0;
+            updateDisplay(0);
+            
+            // Hide warning if reset
+            offlineWarning.classList.add('hidden');
+
+            // Update UI
+            startBtn.classList.remove('bg-amber-500', 'hover:bg-amber-600');
+            startBtn.classList.add('bg-indigo-600', 'hover:bg-indigo-700');
+            startIcon.className = 'fas fa-play';
+            startText.innerText = 'เริ่มจับเวลา';
+        }
+
+        function updateDisplay(time) {
+            // Calculate time components
+            const date = new Date(time);
+            const hours = Math.floor(time / 3600000).toString().padStart(2, '0');
+            const minutes = date.getUTCMinutes().toString().padStart(2, '0');
+            const seconds = date.getUTCSeconds().toString().padStart(2, '0');
+            const milliseconds = date.getUTCMilliseconds().toString().padStart(3, '0');
+
+            // Render
+            displayTime.innerText = `${hours}:${minutes}:${seconds}`;
+            displayMs.innerText = `.${milliseconds}`;
+        }
+    </script>
+</body>
+</html>
