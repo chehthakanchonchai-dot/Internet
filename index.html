@@ -44,10 +44,10 @@
                 </div>
                 <div class="ml-3">
                     <p class="text-sm text-red-700 font-medium">
-                        การเชื่อมต่อขาดหาย ระบบหยุดนับเวลาชั่วคราว
+                        การเชื่อมต่อขาดหาย ระบบได้ยกเลิกการจับเวลาแล้ว
                     </p>
                     <p class="text-xs text-red-500 mt-1">
-                        จะนับต่ออัตโนมัติเมื่ออินเทอร์เน็ตกลับมา
+                        กรุณารอให้อินเทอร์เน็ตกลับมาเพื่อเริ่มจับเวลาใหม่
                     </p>
                 </div>
             </div>
@@ -83,7 +83,6 @@
         let timerInterval = null;
         let isRunning = false;
         let isOnline = navigator.onLine;
-        let wasRunningBeforeOffline = false; // To track if we should auto-resume
         let wakeLock = null; // สำหรับป้องกันหน้าจอดับ
 
         // ฟังก์ชันสำหรับขอให้หน้าจอสว่างตลอดเวลา
@@ -98,7 +97,7 @@
             }
         }
 
-        // เมื่อสลับแท็บกลับมา ให้ทำงานต่อ (บราวเซอร์มักจะยกเลิก Wake Lock เองเมื่อสลับแท็บ)
+        // เมื่อสลับแท็บกลับมา ให้ทำงานต่อ
         document.addEventListener('visibilitychange', async () => {
             if (wakeLock !== null && document.visibilityState === 'visible') {
                 await requestWakeLock();
@@ -124,22 +123,15 @@
         // Network Event Listeners
         window.addEventListener('online', () => {
             updateNetworkStatus(true);
-            // Auto resume if it was running before connection lost
-            if (wasRunningBeforeOffline) {
-                startTimer();
-                wasRunningBeforeOffline = false;
-            }
         });
 
         window.addEventListener('offline', () => {
-            updateNetworkStatus(false);
-            // Pause timer if running
+            // เมื่อเน็ตหลุด ให้หยุดนับทันที และสั่งรีเซ็ตค่าทั้งหมด
             if (isRunning) {
-                wasRunningBeforeOffline = true;
-                pauseTimer();
-            } else {
-                wasRunningBeforeOffline = false;
+                offlineWarning.classList.remove('hidden');
             }
+            resetTimer(); // สั่งรีเซ็ตล้างเวลาและหยุดนับ
+            updateNetworkStatus(false);
         });
 
         function updateNetworkStatus(online) {
@@ -161,10 +153,6 @@
                 statusPing.style.display = 'none'; // Stop ping animation when offline
                 statusText.innerText = 'ออฟไลน์';
                 
-                if(wasRunningBeforeOffline || isRunning) {
-                   offlineWarning.classList.remove('hidden');
-                }
-
                 // Disable start button when offline
                 startBtn.disabled = true;
                 startBtn.classList.add('opacity-50', 'cursor-not-allowed');
@@ -172,7 +160,6 @@
         }
 
         function toggleTimer() {
-            // ขอ Wake Lock เมื่อมีการคลิก (ผู้ใช้มีปฏิสัมพันธ์กับเว็บ) เพื่อให้หน้าจอไม่ดับ
             if (wakeLock === null) {
                 requestWakeLock();
             }
@@ -181,7 +168,6 @@
 
             if (isRunning) {
                 pauseTimer();
-                wasRunningBeforeOffline = false; // Manually paused
             } else {
                 startTimer();
             }
@@ -196,7 +182,7 @@
             timerInterval = setInterval(() => {
                 elapsedTime = Date.now() - startTime;
                 updateDisplay(elapsedTime);
-            }, 10); // Update every 10ms for smooth ms display
+            }, 10);
 
             // Update UI
             startBtn.classList.remove('bg-indigo-600', 'hover:bg-indigo-700');
@@ -218,14 +204,10 @@
 
         function resetTimer() {
             isRunning = false;
-            wasRunningBeforeOffline = false;
             clearInterval(timerInterval);
             elapsedTime = 0;
             updateDisplay(0);
             
-            // Hide warning if reset
-            offlineWarning.classList.add('hidden');
-
             // Update UI
             startBtn.classList.remove('bg-amber-500', 'hover:bg-amber-600');
             startBtn.classList.add('bg-indigo-600', 'hover:bg-indigo-700');
@@ -234,14 +216,12 @@
         }
 
         function updateDisplay(time) {
-            // Calculate time components
             const date = new Date(time);
             const hours = Math.floor(time / 3600000).toString().padStart(2, '0');
             const minutes = date.getUTCMinutes().toString().padStart(2, '0');
             const seconds = date.getUTCSeconds().toString().padStart(2, '0');
             const milliseconds = date.getUTCMilliseconds().toString().padStart(3, '0');
 
-            // Render
             displayTime.innerText = `${hours}:${minutes}:${seconds}`;
             displayMs.innerText = `.${milliseconds}`;
         }
