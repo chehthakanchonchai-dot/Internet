@@ -44,10 +44,10 @@
                 </div>
                 <div class="ml-3">
                     <p class="text-sm text-red-700 font-medium">
-                        การเชื่อมต่อขาดหาย ระบบได้ยกเลิกการจับเวลาแล้ว
+                        การเชื่อมต่อขาดหาย ระบบหยุดการจับเวลาแล้ว
                     </p>
                     <p class="text-xs text-red-500 mt-1">
-                        กรุณารอให้อินเทอร์เน็ตกลับมาเพื่อเริ่มจับเวลาใหม่
+                        เวลาจะหยุดค้างไว้ ณ จุดนี้ และจะไม่นับต่ออัตโนมัติ
                     </p>
                 </div>
             </div>
@@ -83,9 +83,8 @@
         let timerInterval = null;
         let isRunning = false;
         let isOnline = navigator.onLine;
-        let wakeLock = null; // สำหรับป้องกันหน้าจอดับ
+        let wakeLock = null;
 
-        // ฟังก์ชันสำหรับขอให้หน้าจอสว่างตลอดเวลา
         async function requestWakeLock() {
             if ('wakeLock' in navigator) {
                 try {
@@ -97,7 +96,6 @@
             }
         }
 
-        // เมื่อสลับแท็บกลับมา ให้ทำงานต่อ
         document.addEventListener('visibilitychange', async () => {
             if (wakeLock !== null && document.visibilityState === 'visible') {
                 await requestWakeLock();
@@ -126,11 +124,11 @@
         });
 
         window.addEventListener('offline', () => {
-            // เมื่อเน็ตหลุด ให้หยุดนับทันที และสั่งรีเซ็ตค่าทั้งหมด
+            // เมื่อเน็ตหลุด ให้สั่งหยุดการทำงาน (Pause) เพื่อค้างเวลานั้นไว้ ไม่รีเซ็ต
             if (isRunning) {
+                pauseTimer();
                 offlineWarning.classList.remove('hidden');
             }
-            resetTimer(); // สั่งรีเซ็ตล้างเวลาและหยุดนับ
             updateNetworkStatus(false);
         });
 
@@ -142,7 +140,6 @@
                 statusPing.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75';
                 statusPing.style.display = 'block';
                 statusText.innerText = 'ออนไลน์';
-                offlineWarning.classList.add('hidden');
                 
                 // Re-enable button if it was disabled
                 startBtn.disabled = false;
@@ -150,7 +147,7 @@
             } else {
                 networkStatus.className = 'flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-700 transition-colors duration-300';
                 statusDot.className = 'relative inline-flex rounded-full h-3 w-3 bg-red-500';
-                statusPing.style.display = 'none'; // Stop ping animation when offline
+                statusPing.style.display = 'none';
                 statusText.innerText = 'ออฟไลน์';
                 
                 // Disable start button when offline
@@ -164,7 +161,7 @@
                 requestWakeLock();
             }
 
-            if (!isOnline) return; // Prevent starting if offline
+            if (!isOnline) return;
 
             if (isRunning) {
                 pauseTimer();
@@ -179,6 +176,9 @@
             isRunning = true;
             startTime = Date.now() - elapsedTime;
             
+            // ซ่อนกล่องแจ้งเตือนเมื่อเริ่มกดนับเวลา
+            offlineWarning.classList.add('hidden');
+
             timerInterval = setInterval(() => {
                 elapsedTime = Date.now() - startTime;
                 updateDisplay(elapsedTime);
@@ -208,6 +208,8 @@
             elapsedTime = 0;
             updateDisplay(0);
             
+            offlineWarning.classList.add('hidden');
+
             // Update UI
             startBtn.classList.remove('bg-amber-500', 'hover:bg-amber-600');
             startBtn.classList.add('bg-indigo-600', 'hover:bg-indigo-700');
